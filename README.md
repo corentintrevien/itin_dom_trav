@@ -8,13 +8,16 @@ Exemple cartographique des indicateurs obtenus pour les flux domicile-travail de
 ## Programme  
 
 Le programme itineraire_domicile_travail.R contient six fonctions principales à lancer successivement ainsi qu'un exemple d'utilisation sur l'EPCI Saint-Brieuc Armor en 2018
-- extract_rp_data : télécharge les flux domicile-travail sur un territoire donné et une année donnée sur le site de l'Insee (résultats du recensement)
+- extract_rp_data : télécharge les flux domicile-travail sur un territoire donné pour une année donnée sur le site de l'Insee (résultats du recensement)
 - download_itin : calcul les intinéraires routiers pour les ensemble des flux domicile-travail 
-- simplify_itin : simplification des intinéraires routiers c'est-à-dire, reconstruction du réseau routier et recodage des intéraires comme un enchainement de segments
-- map_complem : calcul d'informations complémentaiers 
-- stat_complem
-- draw_map
+- simplify_itin : simplification des intinéraires routiers, c'est-à-dire, reconstruction du réseau routier et recodage des intéraires comme un enchainement de segments élémentaires du réseau routier
+- map_complem : calcul d'informations complémentaires sur les segments élémentaires (sens de circulation, flux de navetteurs, vitesse, altitude, dénivé, caractère urbain ou autoroutier)
+- stat_complem : calcul des caractéristiques des itinéraires domicile-travail à partir des informations complémentaire des segments 
+- draw_map : carte des intinéraires domicile-travail du territoire sélectionné
 
 Le programme fonctions.R contient un ensemble de fonctions secondaires utiles (téléchargement de fichier, lecture des API, traitement des coordonnées géographiques) 
 
 ## Output   
+
+Les six fonctions produisent les fichiers suivants : 
+- 
