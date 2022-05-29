@@ -257,56 +257,6 @@ deduplicate_lines <- function(coord_init,id,TEST=TRUE){
                            c("old_id"=id,"new_id"="seg_id")),
               plyr::rename(subset(coord_new,select=c("lon","lat","new_id")),c("new_id"="seg_id"))))}
 
-deduplicate_lines_old <- function(coords,id){
-  #save_coords<-coords 
-  #coords <- save_coords
-  #id <- "itin_ident_dep"
-  coords <- subset(data.table(coords),select=c(id,"lon","lat"))
-  colnames(coords) <- c("old_id","lon","lat")
-  coords=cbind(coords[duplicated(subset(coords,select=old_id),fromLast = T),],
-               plyr::rename(coords[duplicated(subset(coords,select=old_id)),c("lon","lat")],
-                            replace=c("lon"="lon2","lat"="lat2")))
-  #Identifiant unique de segment
-  coords[,order := (lon>lon2 |(lon==lon2 & lat<lat2))]
-  coords$seg <- with(coords,ifelse(order,paste(lon,lat,lon2,lat2),paste(lon2,lat2,lon,lat)))
-  coords[,seg_id := .GRP,by= "seg"]
-  #Rang du point dans l'itinéraire
-  coords[,ncoord := seq_len(.N), by="old_id"]
-  #Segments uniques
-  unique_seg <- subset(coords,!duplicated(seg_id),select=c(seg_id,lon,lat,lon2,lat2,old_id,order))
-  coords <- coords[,c("old_id","seg_id","ncoord","order")] 
-  #Frequence d'apparition des points
-  count_pt <- plyr::count(data.frame(rbind(unique_seg[,c("lon","lat")],
-                                           plyr::rename(unique_seg[,c("lon2","lat2")],replace=c("lon2"="lon","lat2"="lat")))))
-  unique_seg$count_pt <- count_pt[match(paste0(unique_seg$lon,unique_seg$lat),
-                                        paste0(count_pt$lon,count_pt$lat)),"freq"]
-  #Points de s?paration des lignes
-  unique_seg$first <- (unique_seg$count_pt!=2 | !duplicated(subset(unique_seg,select=old_id)))
-  #Limites des nouveaux segments
-  id_first <- which(unique_seg$first==1)
-  id_last <- append(id_first[2:length(id_first)]-1,nrow(unique_seg))
-  #Nouvel identifiant
-  length_line <- id_last - id_first + 1
-  new_id <- lapply(1:length(id_first),function(x) rep(x,length_line[x]))
-  unique_seg$new_id <- unlist(new_id)
-  #Nouvelle table des coordonnees
-  unique_seg$rang <- 1:nrow(unique_seg)*10
-  new_coord <- subset(unique_seg,select=c("lon","lat","new_id","rang"))
-  new_coord_last <- plyr::rename(unique_seg[id_last,c("lon2","lat2","new_id","rang")],replace=c("lon2"="lon","lat2"="lat"))
-  new_coord_last$rang <- new_coord_last$rang + 1
-  new_coord <- rbind(new_coord,new_coord_last)
-  new_coord <- subset(new_coord[order(new_coord$rang),],select=-rang)
-  #Correspondance ancien et nouvel identifiant 
-  passage_new_itin <- coords[,c("old_id","seg_id","ncoord","order")]
-  rm(coords)
-  passage_new_itin[,c("new_id","new_order")]  <- unique_seg[match(passage_new_itin$seg_id,unique_seg$seg_id),c("new_id","order")]
-  passage_new_itin[,"order"]  <- ifelse(passage_new_itin$order,1,-1)*ifelse(passage_new_itin$new_order,1,-1)
-  passage_new_itin <- passage_new_itin[!duplicated(passage_new_itin[,c("old_id","new_id")]),]
-  passage_new_itin[,nstep := rank(ncoord),by="old_id"]
-  passage_new_itin <- passage_new_itin[,c("old_id","new_id","order","nstep")]
-  return(list(plyr::rename(passage_new_itin,c("old_id"=id,"new_id"="seg_id")),
-              plyr::rename(new_coord,c("new_id"="seg_id"))))}
-
 #Simplification des segments 
 simpli_coord <- function(coord_seg,seg_itin,init_identifier){
   print(paste(nrow(coord_seg),"coordonnées en entrée"))
@@ -347,37 +297,4 @@ from_coord_to_map <- function(coords,id){
   spatial_lines <- st_sfc(spatial_lines,crs=4326)
   spatial_lines <- st_sf(name_lines,geometry=spatial_lines)
   return(spatial_lines)
-}
-
-st_fasterize_map <- function(map_linestring){
-  map_linestring <- st_transform(map_linestring,crs=3035)
-  map_linestring$value <- 1
-  raster_line <- lapply(1:nrow(map_linestring), function(l){
-    first_last <- st_coordinates(map_linestring[l,])
-    first_last <- first_last[c(1,nrow(first_last)),1:2]
-    #bbox de la ligne
-    bbox <- st_bbox(map_linestring[l,])
-    bbox[1:2] <- floor(bbox[1:2]/200)*200
-    bbox[3:4] <- ceiling(bbox[3:4]/200)*200
-    raster <- raster(xmn=bbox["xmin"],ymn=bbox["ymin"],xmx=bbox["xmax"],ymx=bbox["ymax"],resolution=200,crs=3035)
-    if(dim(raster)[1]<=2 & dim(raster)[2]<=2){
-      route <- floor(first_last/200)*200+100
-      route <- st_linestring(route[,c("X","Y")])
-      route <- st_sfc(route,crs=3035)
-      route <- st_sf(geometry=route,seg_id=map_linestring[l,]$seg_id)
-      st_crs(route) <- 3035
-    }else{
-      raster <- fasterize(st_buffer(map_linestring[l,],142),raster,field="value")
-      raster <- transition(raster,function(x) min(x),directions = 8)
-      first_last <- st_coordinates(map_linestring[l,])
-      first_last <- first_last[c(1,nrow(first_last)),]
-      path <- shortestPath(raster, first_last[1,c("X","Y")], first_last[2,c("X","Y")], output = "SpatialLines")
-      route <- st_as_sf(path)
-      route$seg_id <- map_linestring[l,]$seg_id
-      st_crs(route) <- 3035
-    }
-    return(route)
-  })
-  raster_line <- do.call(rbind,raster_line)
-  return(raster_line)
 }

@@ -22,14 +22,18 @@ library("collapse")
 library("rvest")
 
 options(scipen=15)
-setwd("/Users/corentintrevien/Dropbox/Travail/itin_map")
-source('Z-fonctions-v3.R')
+source('fonctions.R')
 
-#TO DO :
-#Stats récapitulatives sur les trajets 
-#Ajouter la largeur des autoroutes (et autres routes ?)
-#Programmer le retry
+###CHARGEMENT DES FLUX COMMUNAUX DOMICILE-TRAVAIL###
+#Permet d'extraire l'ensemble des flux domicile-travail d'une zone prédéfinie pour une année donnée du recensement 
+#- code_zone : code Insee de la zone 
+#- type_zone : type de zone (EPCI, DEP=département, REG=région)
+#- max_dist_vo : distance maximale (à vol d'oiseau en mètres) pour les flux extérieurs (entrant ou sortant de la zone)
+#- year : année RP de référence (entre 2006 et 2018)
+#- all_combi : est-ce que toutes les combinaisons possibles de communes au sein de la zone doivent être prises en compte, y compris les itinéraires sans commuteur 
+#- max_itin_tranche : nombre maximal d'itinéraire par tranche de chargement des données (au dessus, le calculs sont partagés en plusieurs tranches)
 
+code_zone <- "200069409"
 extract_rp_data <- function(code_zone,file_zone,type_zone = "EPCI",max_dist_vo=80000,year=2018,all_combi = FALSE,max_itin_tranche=50000){
   if(type_zone=="EPCI"){var_zone <- "CODE_EPCI"}
   if(type_zone=="DEP"){var_zone <- "INSEE_DEP"}
@@ -174,33 +178,33 @@ extract_rp_data <- function(code_zone,file_zone,type_zone = "EPCI",max_dist_vo=8
     
   
   dir.create(path=file_zone,showWarnings = FALSE)
-  fwrite(data_itin_zone,paste0(file_zone,"/data_itin_",file_zone,".csv.gz"))
+  dir.create(paste0(file_zone,"/Itin"),showWarnings = FALSE)
+  fwrite(data_itin_zone,paste0(file_zone,"/Itin/data_itin_",file_zone,".csv.gz"))
   print(Sys.time() - deb)
   
 }
 
-#Suppression des trajets nuls de plus de 20 km (pour limiter le nombre d'itinéraires à charger)
-#extract_rp_data(code_zone="11",file_zone="idf",type_zone = "REG",all_combi = TRUE,year=2014,max_itin_tranche=200000)
-#data_itin_idf <- fread("idf/data_itin_idf.csv.gz")
-#fwrite(subset(data_itin_idf,dist_vo<=20000 | flux_voit_2014>0),"idf/data_itin_idf.csv.gz")
-
 ###CHARGEMENT DES ITINERAIRES###
-#Programmer la compression en cas d'arrêt
-#API itinéraire 
-
-#file_zone <- "saint_brieuc_armor"
-download_itin <- function(file_zone,modep="car",retry=FALSE,optim ="fastest",peage=TRUE){
+#Permet de calculer les itinéraires routiers entre ensemble d'OD : 
+#- file_zone : fichier produit par la fonction extract_rp_data ou chargée de l'extérieur, contenant pour chaque OD : 
+#                    - xxx
+#                    - xxx
+#                    - xxx
+#                    - xxx
+#- modep : mode de déplacement de l'itinéraire ("car"/"pedestrian")
+#- peage : l'itinéraire emprunte les routes à péage (TRUE/FALSE)
+#- optim : mode d'optimisation de l'itinéraire ("fastest"/"shortest")
+download_itin <- function(file_zone,modep="car",optim ="fastest",peage=TRUE){
   deb <- Sys.time()
 
-  #data_dep_arr <- fread(paste0(file_zone,"/data_itin_",file_zone,".csv.gz"),colClasses = list(character=c("codgeo_dep","codgeo_arr")))
-  data_dep_arr <- fread(paste0(file_zone,"/data_itin_",file_zone,".csv.gz"))
+  #data_dep_arr <- fread(paste0(file_zone,"/Itin/data_itin_",file_zone,".csv.gz"),colClasses = list(character=c("codgeo_dep","codgeo_arr")))
+  data_dep_arr <- fread(paste0(file_zone,"/Itin/data_itin_",file_zone,".csv.gz"))
   
   #Suppression des doublons
   data_dep_arr <- subset(data_dep_arr,select=c("itin_id","lon_dep","lat_dep","lon_arr","lat_arr","tranche"))
   data_dep_arr <- data_dep_arr[!duplicated(data_dep_arr),]
   setDF(data_dep_arr)
   
-  dir.create(paste0(file_zone,"/Itin"),showWarnings = FALSE)
   
   #Zippage des tables ouvertes 
   # list_files <- list.files(paste0(file_zone,"/Itin"))
@@ -288,16 +292,10 @@ download_itin <- function(file_zone,modep="car",retry=FALSE,optim ="fastest",pea
     
   }
 }
-#download_itin("idf")
-download_itin("ile_de_france")
-#download_itin("ile_de_france_bus",peage=FALSE,optim="shortest")
 
-file_zone <- "ile_de_france"
-test <- fread(paste0(file_zone,"/data_itin_",file_zone,".csv.gz"))
-
-###MISE EN FORME DE LA CARTE###
-#file_zone <- "ile_de_france_bus"
-make_map_itin <- function(file_zone){
+###MISE EN FORME DES DONNES CARTOGRAPHIQUES###
+#Simplifie le fichier cartographique des OD en découpant le réseau routier en segments élémentaires puis en recodant chaque itinéraire comme succession de segments
+simplify_itin <- function(file_zone){
   deb <- Sys.time()
   
   #Liste des tranches 
@@ -424,6 +422,9 @@ make_map_itin <- function(file_zone){
   map_itin <- from_coord_to_map(coord_seg_final,"seg_id")
   st_write(map_itin,paste0(file_zone,"/",file_zone,"_map.shp"),delete_dsn =TRUE)
   print(Sys.time()-deb)
+  #Enregistrement de la correspondance segment-itinéraire finale
+  seg_itin_final <- fread(paste0(file_zone,"/Itin/",file_zone,"_seg_itin.csv.gz"))
+  fwrite(seg_itin_final,paste0(file_zone,"/map_itin_",file_zone,".csv.gz"))
   
   #Etapes et itinéraire 
   if(length(tranche_all) > 1){
@@ -458,13 +459,17 @@ make_map_itin <- function(file_zone){
   print(Sys.time()-deb)
 
 }
-make_map_itin("ile_de_france")
-make_map_itin("ile_de_france_bus")
-#make_map_itin("saint_brieuc_armor")
-#make_map_itin("sba2")
 
-###ENRICHISSEMENT DE LA CARTE###
-info_complem <- function(file_zone){
+###ENRICHISSEMENT DES DONNES CARTOGRAPHIQUES###
+#Enrichit le fichier cartographique des segments élémentaires avec les informations suivantes :
+#- Commune de départ et d'arrivée 
+#- Sens de circulation du segment (uni ou bidirectionnel)
+#- Flux de commuter sur chaque segement
+#- Vitesse de circulation
+#- Occupation des sols 
+#- Repérage des autoroutes 
+#- Déclivité 
+map_complem <- function(file_zone){
   deb <- Sys.time()
   print("CHARGMENT DES DONNEES")
   
@@ -474,7 +479,7 @@ info_complem <- function(file_zone){
   #Chargement des données
   step <- fread(paste0(file_zone,"/Itin/",file_zone,"_step.csv.gz"))
   step$itin_id <- substr(step$step_id,1,11)
-  data_itin <- fread(paste0(file_zone,"/data_itin_",file_zone,".csv.gz"))
+  data_itin <- fread(paste0(file_zone,"/Itin/data_itin_",file_zone,".csv.gz"))
   seg_itin <- fread(paste0(file_zone,"/Itin/",file_zone,"_seg_itin.csv.gz"))
   print(Sys.time()-deb)
   
@@ -755,21 +760,68 @@ info_complem <- function(file_zone){
   #Enregistrement des enrichissements 
   fwrite(st_drop_geometry(map_itin), paste0(file_zone,"/map_complements_",file_zone,".csv.gz"))
 }
-#info_complem("ile_de_france_bus")
-info_complem("ile_de_france")
 
-###STATISTIQUES SUR LES ITINERAIRES : Declivité, flux min, max, mean, med, occupation des sols, part autoroute
-file_zone <- "ile_de_france"
+###STATISTIQUES SUR LES ITINERAIRES 
+#Enrichit le fichier cartographique des segments élémentaires avec les informations suivantes :
+#Caractéristique de chaque trajet OD : Declivité, flux min, max, moyen, median, occupation des sols, part autoroute
+stat_complem <- function(file_zone){
+  
+  data_map_itin <- fread(paste0(file_zone,"/Itin/data_itin_",file_zone,".csv.gz"))
+  data_seg <- fread(paste0(file_zone,"/map_complements_",file_zone,".csv.gz"))
+  seg_itin <- fread(paste0(file_zone,"/Itin/",file_zone,"_seg_itin.csv.gz"))
+  seg_itin$itin_id <- substr(seg_itin$step_id,1,11)
+  data_itin <- fread(paste0(file_zone,"/Itin/",file_zone,"_itin.csv.gz"))
+  
+  #Var flux
+  var_flux <- colnames(data_map_itin)
+  var_flux <- var_flux[substr(var_flux,1,5)=="flux_"]
+  data_seg$flux_voit <-apply(subset(data_seg,select=paste0(var_flux,c("_inv","_dir"))),1,max)
+  data_seg[is.na(flux_voit),"flux_voit"] <- 0
+  
+  #Type voie
+  data_seg$autoroute <- as.numeric(data_seg$autoroute)
+  data_seg$urbain <- with(data_seg,os_bati/os_total)
+  
+  #Pente
+  data_seg$lenght_pente <- with(data_seg,plat+faible_desc + faible_montee+moyen_desc +
+                                  moyen_montee+forte_desc + forte_montee)
+  data_seg$plat_pente <- with(data_seg,plat/lenght_pente)
+  data_seg$faible_pente <- with(data_seg,(faible_desc + faible_montee)/lenght_pente)
+  data_seg$moyen_pente <- with(data_seg,(moyen_desc + moyen_montee)/lenght_pente)
+  data_seg$forte_pente <- with(data_seg,(forte_desc + forte_montee)/lenght_pente)
+  
+  #Durée 
+  data_seg$duree_seg <- with(data_seg,60*(length/1000)/vitesse)
+  
+  #Fusion données 
+  data_seg <- subset(data_seg, select = c("seg_id","length","flux_voit","urbain","autoroute","nb_voies", 
+                                          "deniv_pos","deniv_neg","plat_pente","faible_pente","moyen_pente",
+                                          "forte_pente","duree_seg"))
+  seg_itin <- left_join(seg_itin,data_seg, by = "seg_id")
+  
+  #Stat 
+  stat_itin <- collap(seg_itin, autoroute+urbain+plat_pente+faible_pente+moyen_pente+forte_pente~ itin_id,  fmean , w = ~ length) 
+  stat_itin <- full_join(stat_itin,collap(seg_itin,  deniv_pos+deniv_neg+duree_seg~ itin_id, fsum))
+  
+  #Stat flux voit
+  stat_itin <- full_join(stat_itin,collap(seg_itin, flux_voit ~  itin_id, list(fmedian,fmean,fmax) , w = ~ length))
+  stat_itin <- plyr::rename(stat_itin,c("fmedian.flux_voit"="flux_voit_median","fmax.flux_voit"="flux_voit_max","fmean.flux_voit"="flux_voit_mean"))
+  
+  #Données initiales
+  stat_itin <- full_join(data_itin,stat_itin)
+  stat_itin <- full_join(subset(data_map_itin,select=c("itin_id","codgeo_dep","codgeo_arr",var_flux,"sens","dist_vo")),stat_itin)
+  fwrite(stat_itin,paste0(file_zone,"/stat_itin_",file_zone,".csv.gz"))
+}
 
 ###CARTES###
-draw_map <- function(file_zone){
+draw_map <- function(file_zone,title=""){
   
   map_itin <- st_read(paste0(file_zone,"/",file_zone,"_map.shp"))
   data_map_itin <- fread(paste0(file_zone,"/map_complements_",file_zone,".csv.gz"))
   map_itin <- left_join(map_itin,data_map_itin,by='seg_id')
   
   #Contour de la zone d'intérêt
-  data_itin <- fread(paste0(file_zone,"/data_itin_",file_zone,".csv.gz"))
+  data_itin <- fread(paste0(file_zone,"/Itin/data_itin_",file_zone,".csv.gz"))
   commune <- read_admin_express_ign("COMMUNE")
   commune <- commune[commune$INSEE_COM %in% unique(data_itin[zone_dep==1,]$codgeo_dep),]
   map_contour <- st_union(commune)
@@ -779,7 +831,8 @@ draw_map <- function(file_zone){
   pdf(paste0(file_zone,"/Map/",file_zone,'_map.pdf'))
   
   #Mono/bidirectionnel 
-  plot(st_geometry(map_contour),border=NA,col="lightgrey",main="Direction",
+  plot(st_geometry(map_contour),border=NA,col="lightgrey",main=paste(title,"Sens de circulation"),
+       sub="Flux domicile-travail en voiture selon le recensement (sources Insee et IGN)",
        xlim=st_bbox(map_itin)[c(1, 3)], ylim = st_bbox(map_itin)[c(2, 4)])
 
   plot(st_geometry(map_itin[map_itin$bidir==1,]),add=TRUE,lwd=0.5,col="red") 
@@ -789,17 +842,19 @@ draw_map <- function(file_zone){
          col=c("red", "blue"), lty=1, cex=0.8)
   
   #Autoroutes 
-  plot(st_geometry(map_contour),border=NA,col="lightgrey",main="Autoroute",
+  plot(st_geometry(map_contour),border=NA,col="lightgrey",main=paste(title,"Autoroutes"),
+       sub="Flux domicile-travail en voiture selon le recensement (sources Insee et IGN)",
        xlim=st_bbox(map_itin)[c(1, 3)], ylim = st_bbox(map_itin)[c(2, 4)])
   
-  plot(st_geometry(map_itin[map_itin$autoroute==FALSE,]),add=TRUE,lwd=0.5,col="purple") 
-  plot(st_geometry(map_itin[map_itin$autoroute==TRUE,]),add=TRUE,lwd=0.5) 
+  plot(st_geometry(map_itin[map_itin$autoroute==FALSE,]),add=TRUE,lwd=0.5) 
+  plot(st_geometry(map_itin[map_itin$autoroute==TRUE,]),add=TRUE,lwd=1,col="purple") 
   
   legend("bottomleft", legend=c("Type autoroutier", "Autre"),
          col=c("purple", "black"), lty=1, cex=0.8)
   
   #Vitesse 
-  plot(st_geometry(map_contour),border=NA,col="lightgrey",main="Vitesse",
+  plot(st_geometry(map_contour),border=NA,col="lightgrey",main=paste(title,"Vitesse de circulation"),
+       ,sub="Flux domicile-travail en voiture selon le recensement (sources Insee et IGN)",
        xlim=st_bbox(map_itin)[c(1, 3)], ylim = st_bbox(map_itin)[c(2, 4)])
   
   plot(st_geometry(map_itin[map_itin$vitesse<=50,]),add=TRUE,col="darkgrey",lwd=0.5)
@@ -824,7 +879,8 @@ draw_map <- function(file_zone){
   tr_flux <- round(tr_flux)
   tr_flux <- sort(tr_flux)
   
-  plot(st_geometry(map_contour),border=NA,col="lightgrey",main="Flux",
+  plot(st_geometry(map_contour),border=NA,col="lightgrey",main=paste(title,"Flux quotidien"), 
+       sub="Flux domicile-travail en voiture selon le recensement (sources Insee et IGN)",
        xlim=st_bbox(map_itin)[c(1, 3)], ylim = st_bbox(map_itin)[c(2, 4)])
   
   plot(st_geometry(map_itin[map_itin$flux_max<=tr_flux[1],]),add=TRUE,col="darkgrey",lwd=0.5)
@@ -839,11 +895,11 @@ draw_map <- function(file_zone){
   name_tr_flux <- lapply(2:7,function(i) paste0(name_tr_flux[i-1],"-",name_tr_flux[i]))
   name_tr_flux <- c(name_tr_flux,paste0(">",tr_flux[6]))
   
-  legend("bottomleft", legend=name_tr_flux,
+  legend("bottomleft", legend=name_tr_flux,title="Nb. de véhicules",
          col=c("darkgrey","blue","green","gold","orange","red","purple"), lty=1, cex=0.8)
-  
+
   #Occupation des zones 
-  plot(st_geometry(map_contour),border=NA,col="lightgrey",main="Urbain",
+  plot(st_geometry(map_contour),border=NA,col="lightgrey",main=paste(title,"Zones urbaines"), 
        xlim=st_bbox(map_itin)[c(1, 3)], ylim = st_bbox(map_itin)[c(2, 4)])
 
   map_itin$part_urbain <- with(map_itin,(os_bati + os_carriere_decharge + os_zone_dactivites)/length)
@@ -859,7 +915,8 @@ draw_map <- function(file_zone){
   map_itin$alti_mean <-with(map_itin,(alti_arr+alti_dep)/2) 
   tr_alti <- round(quantile(map_itin$alti_mean,probs= 1:4/5))
   
-  plot(st_geometry(map_contour),border=NA,col="lightgrey",main="Altitude",
+  plot(st_geometry(map_contour),border=NA,col="lightgrey",main=paste(title,"Altitude"),
+       sub="Flux domicile-travail en voiture selon le recensement (sources Insee et IGN)",
        xlim=st_bbox(map_itin)[c(1, 3)], ylim = st_bbox(map_itin)[c(2, 4)])
   
   plot(st_geometry(map_itin[map_itin$alti_mean<=tr_alti[1],]),col="darkgreen",add=TRUE,lwd=0.5)
@@ -879,7 +936,8 @@ draw_map <- function(file_zone){
   var_deniv <- c("forte_desc","moyen_desc","faible_desc","plat","faible_montee","moyen_montee","forte_montee")
   map_itin$type_deniv <- var_deniv[apply(st_drop_geometry(map_itin)[,var_deniv],1,which.max)]
   
-  plot(st_geometry(map_contour),border=NA,col="lightgrey",main="Dénivelé",
+  plot(st_geometry(map_contour),border=NA,col="lightgrey",main=paste(title,"Dénivelé"),
+       sub="Flux domicile-travail en voiture selon le recensement (sources Insee et IGN)",
        xlim=st_bbox(map_itin)[c(1, 3)], ylim = st_bbox(map_itin)[c(2, 4)])
   
   plot(st_geometry(map_itin[map_itin$type_deniv %in% "plat",]),col="darkgrey",add=TRUE,lwd=0.5)
@@ -887,89 +945,21 @@ draw_map <- function(file_zone){
   plot(st_geometry(map_itin[map_itin$type_deniv %in% c("moyen_desc","moyen_montee"),]),col="blue",add=TRUE,lwd=0.5)
   plot(st_geometry(map_itin[map_itin$type_deniv %in% c("forte_desc","forte_montee"),]),col="purple",add=TRUE,lwd=0.5)
 
-  # 
-  # map_itin$deniv_tot <- (abs(map_itin$deniv_neg) + abs(map_itin$deniv_pos))/map_itin$length
-  # map_itin[is.na(map_itin$deniv_tot),"deniv_tot"] <- 0
-  # tr_deniv <- round(quantile(map_itin$deniv_tot,probs= 1:4/5),3)
-  # 
-  # plot(st_geometry(map_contour),border=NA,col="lightgrey",main="Dénivelé",
-  #      xlim=st_bbox(map_itin)[c(1, 3)], ylim = st_bbox(map_itin)[c(2, 4)])
-  # 
-  # plot(st_geometry(map_itin[map_itin$deniv_tot<=tr_deniv[1],]),col="darkgrey",add=TRUE,lwd=0.5)
-  # plot(st_geometry(map_itin[map_itin$deniv_tot>tr_deniv[1] & map_itin$deniv_tot<=tr_deniv[2],]),col="deepskyblue",add=TRUE,lwd=0.5)
-  # plot(st_geometry(map_itin[map_itin$deniv_tot>tr_deniv[2] & map_itin$deniv_tot<=tr_deniv[3],]),col="cyan",add=TRUE,lwd=0.5)
-  # plot(st_geometry(map_itin[map_itin$deniv_tot>tr_deniv[3] & map_itin$deniv_tot<=tr_deniv[4],]),col="blue",add=TRUE,lwd=0.5)
-  # plot(st_geometry(map_itin[map_itin$deniv_tot>=tr_deniv[4],]),col="purple",add=TRUE,lwd=0.5)
-  # 
-  # name_tr_deniv <-c(0,tr_deniv*100)
-  # name_tr_deniv <- lapply(2:5,function(i) paste0(name_tr_deniv[i-1],"-",name_tr_deniv[i]," %"))
-  # name_tr_deniv <- c(name_tr_deniv,paste0(">",tr_deniv[4]*100," %"))
-  # 
-  # legend("bottomleft", legend=name_tr_deniv,
-  #        col=c("darkgrey","deepskyblue","cyan","blue","purple"), lty=1, cex=0.8)
+  legend("bottomleft", legend=c("Faible", "Moyen","Fort"),
+         col=c("darkgrey", "blue","purple"), lty=1, cex=0.8)
   
   dev.off()
   
-  
 }
-draw_map("ile_de_france")
-#draw_map("ile_de_france_bus")
 
-file_zone <- "idf"
-#Mise en forme des itinéraires (sous forme de fichiers cartographique)
-itin_complem <- function(file_zone){
-
-  data_itin_idf <- fread(paste0(file_zone,"/data_itin_",file_zone,".csv.gz"))
-  data_seg <- fread(paste0(file_zone,"/map_complements_",file_zone,".csv.gz"))
-  seg_itin <- fread(paste0(file_zone,"/Itin/",file_zone,"_seg_itin.csv.gz"))
-  seg_itin$itin_id <- substr(seg_itin$step_id,1,11)
-  data_itin <- fread(paste0(file_zone,"/Itin/",file_zone,"_itin.csv.gz"))
-  
-  #Var flux
-  var_flux <- colnames(data_map_itin)
-  var_flux <- var_flux[substr(var_flux,1,5)=="flux_"]
-  data_seg$flux_voit <-apply(subset(data_seg,select=var_flux),1,max)
-  data_seg[is.na(flux_voit),"flux_voit"] <- 0
-  #Type voie
-  data_seg$autoroute <- as.numeric(data_seg$autoroute)
-  data_seg$urbain <- with(data_seg,os_bati/os_total)
-  #Pente
-  data_seg$lenght_pente <- with(data_seg,plat+faible_desc + faible_montee+moyen_desc +
-                                  moyen_montee+forte_desc + forte_montee)
-  data_seg$plat_pente <- with(data_seg,plat/lenght_pente)
-  data_seg$faible_pente <- with(data_seg,(faible_desc + faible_montee)/lenght_pente)
-  data_seg$moyen_pente <- with(data_seg,(moyen_desc + moyen_montee)/lenght_pente)
-  data_seg$forte_pente <- with(data_seg,(forte_desc + forte_montee)/lenght_pente)
-  #Durée 
-  data_seg$duree_seg <- with(data_seg,60*(length/1000)/vitesse)
-  
-  #Fusion données 
-  data_seg <- subset(data_seg, select = c("seg_id","length","flux_voit","urbain","autoroute","nb_voies", 
-                                          "deniv_pos","deniv_neg","plat_pente","faible_pente","moyen_pente",
-                                          "forte_pente","duree_seg"))
-  seg_itin <- left_join(seg_itin,data_seg, by = "seg_id")
-
-  #Stat 
-  stat_itin <- collap(seg_itin, autoroute+urbain+plat_pente+faible_pente+moyen_pente+forte_pente~  itin_id, 
-                           fmean , w = ~ length) 
-  stat_itin <- full_join(stat_itin,collap(seg_itin,  deniv_pos+deniv_neg+duree_seg~ itin_id, fsum))
-  
-  #Stat flux voit
-  stat_itin <- full_join(stat_itin,collap(seg_itin, flux_voit ~  itin_id, list(fmedian,fmean,fmax) , w = ~ length))
-  
-  quantiles_flux_voit <- lapply(c(0.5,0.75,0.9),function(p){
-    q <- fnth(seg_itin$flux_voit,n=p,w=seg_itin$length,g=seg_itin$itin_id)
-    q <- data.frame(names(q),q)
-    colnames(q) <- c("itin_id",paste0("q",p*100,".flux_voit"))
-    return(q)})
-  quantiles_flux_voit <- Reduce(full_join,quantiles_flux_voit)
-  stat_flux_voit <- full_join(stat_flux_voit,quantiles_flux_voit)
-  stat_itin <- full_join(stat_itin,quantiles_flux_voit)
-  
-  #Données initiales
-  stat_itin <- full_join(data_itin,stat_itin)
-  fwrite(stat_itin,paste0(file_zone,"/itin_complements_",file_zone,".csv.gz"))
+RUN_ALGO <- FALSE
+if(RUN_ALGO==TRUE){
+  #EXEMPLE AVEC L'EPCI SAINT BRIEUC ARMOR
+  extract_rp_data(code_zone = "200069409", file_zone="saint_brieuc_armor")
+  download_itin("saint_brieuc_armor")
+  simplify_itin("saint_brieuc_armor")
+  map_complem("saint_brieuc_armor")
+  stat_complem("saint_brieuc_armor")
+  draw_map("saint_brieuc_armor",title="Mobilités pendulaires - 2018 - Saint-Brieuc Armor\nItinéraires routiers\n")
 }
-itin_complem("idf")
 
-plot(st_geometry(st_read(paste0(file_zone,"/","gam","_map.shp"))),lwd = 0.2)
